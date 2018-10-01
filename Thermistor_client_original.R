@@ -52,7 +52,8 @@ new_indication_handler <- function(rcvd_temp) {
   
   grouping_size <- 450
   stability_threshold <- .25
-  rle_threshold <- 68
+  stable_rle_threshold <- 66
+  unstable_rle_threshold <- 30
   
   if(temp_events_counter > grouping_size && temp_events_counter <= BUF_SIZE){
     temp_events$time[temp_events_counter] <<- now
@@ -63,13 +64,13 @@ new_indication_handler <- function(rcvd_temp) {
     temp_events$is_stable[temp_events_counter] <<- ifelse(temp_events$diff_sum[temp_events_counter] < stability_threshold, 1, 0)
     temp_events$rolling_rle[temp_events_counter] <<- sequence(rle(temp_events$is_stable)$lengths)[temp_events_counter]
     
-    if (temp_events$is_stable[temp_events_counter] == 1 &&  temp_events$rolling_rle[temp_events_counter] == rle_threshold) {
+    if (temp_events$is_stable[temp_events_counter] == 1 &&  temp_events$rolling_rle[temp_events_counter] == stable_rle_threshold) {
       message(now, "PROCESS IS STABLE NOW")
       send_signal <- TRUE
       is_stable <- TRUE
       stable_temp <- rcvd_temp
       
-    } else if (temp_events$is_stable[temp_events_counter] == 0 && temp_events$rolling_rle[temp_events_counter] == rle_threshold) {
+    } else if (temp_events$is_stable[temp_events_counter] == 0 && temp_events$rolling_rle[temp_events_counter] == unstable_rle_threshold) {
       message(now, "PROCESS IS UNSTABLE NOW")
       send_signal <- TRUE
       is_stable <- FALSE
@@ -115,8 +116,8 @@ Draw <- function()
   }
 }
 
-#best score: 85 (error term of 115)
-#settings: 450 groups, .25 abs diff, rle of 50
+#best score: 96 (error term of 104.4)
+#settings: 450 groups, .25 abs diff, stable rle of 66, unstable rle of 30
 
 #improvement thoughts
 #raise threshold for stability to .3

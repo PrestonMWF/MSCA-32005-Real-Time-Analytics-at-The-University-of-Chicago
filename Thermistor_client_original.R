@@ -12,12 +12,15 @@ temp_events <- data.frame(time=.POSIXct(rep(NA, BUF_SIZE)),     # dataframe for 
                           rolling_diff=as.numeric(rep(NaN,BUF_SIZE)),
                           diff_sum=as.numeric(rep(NaN,BUF_SIZE)),
                           is_stable=as.numeric(rep(0,BUF_SIZE)),
-                          rolling_rle=as.numeric(rep(NaN,BUF_SIZE)),
-                          sign_rle=as.numeric(rep(NaN,BUF_SIZE)))
+                          rolling_rle=as.numeric(rep(NaN,BUF_SIZE)))
 
 signals <- data.frame(time=.POSIXct(rep(NA, BUF_SIZE)),         # dataframe for our signals
                       is_stable=as.logical(rep(NA,BUF_SIZE)),
                       stable_temp=as.numeric(rep(NaN,BUF_SIZE)))
+
+signals_reference <- signals
+signals_reference$time[1] <- Sys.time() - 1000000
+signals_reference <- signals_reference[!is.na(signals_reference$time),]
 
 initial_timestamp <- Sys.time()      # start-of-program timestamp
 plot_timestamp <- initial_timestamp  # we use plot_timestamp to draw the plot once in a second
@@ -42,7 +45,6 @@ new_indication_handler <- function(rcvd_temp) {
   temp_events$time[temp_events_counter] <<- now
   temp_events$temp[temp_events_counter] <<- rcvd_temp
   temp_events$rolling_diff <<- c(0, diff(temp_events$temp))
-  temp_events$sign_rle[temp_events_counter] <<- sequence(rle(sign(temp_events$rolling_diff))$lengths)[temp_events_counter]
   temp_events$rolling_rle[temp_events_counter] <<- sequence(rle(temp_events$is_stable)$lengths)[temp_events_counter]
   
   # this is just an example how handler may decide the process is stable
@@ -51,30 +53,41 @@ new_indication_handler <- function(rcvd_temp) {
   stable_temp <- NaN
   
   grouping_size <- 450
+  
   stability_threshold <- .25
-  stable_rle_threshold <- 66
-  unstable_rle_threshold <- 30
+  
+  stable_rle_threshold <- 25
+  unstable_rle_threshold <- 1
+  
+  time_threshold <- 12
   
   if(temp_events_counter > grouping_size && temp_events_counter <= BUF_SIZE){
     temp_events$time[temp_events_counter] <<- now
     temp_events$temp[temp_events_counter] <<- rcvd_temp
     temp_events$rolling_diff <<- c(0, diff(temp_events$temp))
     temp_events$diff_sum[temp_events_counter] <<- abs(sum(temp_events$rolling_diff[(temp_events_counter - grouping_size):temp_events_counter]))
-    temp_events$sign_rle[temp_events_counter] <<- sequence(rle(sign(temp_events$rolling_diff))$lengths)[temp_events_counter]
     temp_events$is_stable[temp_events_counter] <<- ifelse(temp_events$diff_sum[temp_events_counter] < stability_threshold, 1, 0)
     temp_events$rolling_rle[temp_events_counter] <<- sequence(rle(temp_events$is_stable)$lengths)[temp_events_counter]
     
     if (temp_events$is_stable[temp_events_counter] == 1 &&  temp_events$rolling_rle[temp_events_counter] == stable_rle_threshold) {
-      message(now, "PROCESS IS STABLE NOW")
-      send_signal <- TRUE
-      is_stable <- TRUE
-      stable_temp <- rcvd_temp
+      if (difftime(now, tail(signals_reference$time, 1), units = "sec") < time_threshold){
+        send_signal <- FALSE
+      } else if (difftime(now, tail(signals_reference$time, 1), units = "sec") > time_threshold){
+        message(now, "PROCESS IS STABLE NOW")
+        send_signal <- TRUE
+        is_stable <- TRUE
+        stable_temp <- rcvd_temp
+      }
       
     } else if (temp_events$is_stable[temp_events_counter] == 0 && temp_events$rolling_rle[temp_events_counter] == unstable_rle_threshold) {
-      message(now, "PROCESS IS UNSTABLE NOW")
-      send_signal <- TRUE
-      is_stable <- FALSE
-      stable_temp <- rcvd_temp
+      if (difftime(now, tail(signals_reference$time, 1), units = "sec") < time_threshold){
+        send_signal <- FALSE
+      } else if (difftime(now, tail(signals_reference$time, 1), units = "sec") > time_threshold){
+        message(now, "PROCESS IS UNSTABLE NOW")
+        send_signal <- TRUE
+        is_stable <- FALSE
+        stable_temp <- rcvd_temp
+      }
     }
   }
   
@@ -82,6 +95,8 @@ new_indication_handler <- function(rcvd_temp) {
     # update signals dataframe (append last value):
     signals_counter <<- signals_counter + 1
     signals[signals_counter,] <<- list(now, is_stable, stable_temp)
+    
+    signals_reference[signals_counter,] <<- list(now, is_stable, stable_temp)
   }
   
   
@@ -116,8 +131,9 @@ Draw <- function()
   }
 }
 
-#best score: 96 (error term of 104.4)
-#settings: 450 groups, .25 abs diff, stable rle of 66, unstable rle of 30
+#best score: 100 (error term of 87.7)
+#settings: 450 groups, .25 abs diff
+#stable rle == 25, unstable rle == 1, time threshold 10
 
 #improvement thoughts
 #raise threshold for stability to .3

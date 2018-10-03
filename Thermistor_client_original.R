@@ -59,7 +59,7 @@ new_indication_handler <- function(rcvd_temp) {
   stable_rle_threshold <- 25
   unstable_rle_threshold <- 1
   
-  time_threshold <- 12
+  time_threshold <- 15
   
   if(temp_events_counter > grouping_size && temp_events_counter <= BUF_SIZE){
     temp_events$time[temp_events_counter] <<- now
@@ -131,9 +131,9 @@ Draw <- function()
   }
 }
 
-#best score: 100 (error term of 87.7)
+#best score: 100 (error term of 75.7, ~24 less than target of 100)
 #settings: 450 groups, .25 abs diff
-#stable rle == 25, unstable rle == 1, time threshold 10
+#stable rle == 25, unstable rle == 1, time threshold 15
 
 # server options
 host <- "datastream.ilykei.com"

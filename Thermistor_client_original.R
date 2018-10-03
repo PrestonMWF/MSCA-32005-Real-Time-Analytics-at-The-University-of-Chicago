@@ -135,13 +135,6 @@ Draw <- function()
 #settings: 450 groups, .25 abs diff
 #stable rle == 25, unstable rle == 1, time threshold 10
 
-#improvement thoughts
-#raise threshold for stability to .3
-#change rolling window
-#change rle trigger
-#account for direction change- don't use absolute difference, use relative
-
-
 # server options
 host <- "datastream.ilykei.com"
 port <- 30001

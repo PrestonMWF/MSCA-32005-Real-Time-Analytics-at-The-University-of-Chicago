@@ -9,7 +9,7 @@ load('hft2_decomp_model.Rdata')  # load decomposition model
 
 # global vars 
 ## !!! barrier should be changed for test assignment !!!
-barrier <- 193900  # ES barrier multiplied by 100
+barrier <- 194500  # ES barrier multiplied by 100
 tick <- 25         # ES tick is multiplied by 100 since prices are also multiplied by 100
 position <- 0      # current position
 # create buffers in advance:
@@ -35,16 +35,22 @@ start_time <- Sys.time()
 plot_timestamp <- Sys.time()  # last plotting time, we use it to plot the graph once in a second
 
 # we use local_df to store values used for predictions
-probit_local_df <- data.frame(y1=factor(rep(NaN, BUF_SIZE),levels=m1$xlevels$y1),
-                              y2=factor(rep(NaN, BUF_SIZE),levels=m1$xlevels$y2),
-                              y3=factor(rep(NaN, BUF_SIZE),levels=m1$xlevels$y3),
-                              v1=as.numeric(rep(NA, BUF_SIZE)),
-                              v2=as.numeric(rep(NA, BUF_SIZE)),
-                              v3=as.numeric(rep(NA, BUF_SIZE)),
-                              vix=as.numeric(rep(NA, BUF_SIZE)),
+probit_local_df <- data.frame(y1=factor(rep("0", BUF_SIZE),levels=m1$xlevels$y1),
+                              y2=factor(rep("0", BUF_SIZE),levels=m1$xlevels$y2),
+                              y3=factor(rep("0", BUF_SIZE),levels=m1$xlevels$y3),
+                              v1=as.numeric(rep(0, BUF_SIZE)),
+                              v2=as.numeric(rep(0, BUF_SIZE)),
+                              v3=as.numeric(rep(0, BUF_SIZE)),
+                              vix=as.numeric(rep(0, BUF_SIZE)),
                               last_es_price=as.numeric(rep(NA, BUF_SIZE)),
                               pch=as.numeric(rep(NA, BUF_SIZE)),
                               cut_pch=as.numeric(rep(NA, BUF_SIZE)))
+
+decomp_local_df <- data.frame(aim1=as.numeric(rep(0, BUF_SIZE)),
+                              dim1=as.numeric(rep(0, BUF_SIZE)),
+                              sim1=as.numeric(rep(0, BUF_SIZE)),
+                              k=as.numeric(rep(0, BUF_SIZE)),
+                              cross_prob=as.numeric(rep(0, BUF_SIZE)))
 
 last_es_price <- 0
 
@@ -76,15 +82,37 @@ markettrade_handler <- function(symbol, trade_price, trade_size, trade_side) {
     probit_local_df$cut_pch[trades_counter] <<- min(1, max(-1, probit_local_df$pch[trades_counter]))  # cut too high jumps
     
     probit_local_df$y1[trades_counter] <<- probit_local_df$pch[trades_counter - 1]
+    probit_local_df$y1[trades_counter] <<- ifelse(is.na(probit_local_df$y1[trades_counter]),
+                                                  0,
+                                                  probit_local_df$y1[trades_counter])
+    
+    
     probit_local_df$y2[trades_counter] <<- probit_local_df$pch[trades_counter - 2]
+    probit_local_df$y2[trades_counter] <<- ifelse(is.na(probit_local_df$y2[trades_counter]),
+                                                  0,
+                                                  probit_local_df$y2[trades_counter])
+    
     probit_local_df$y3[trades_counter] <<- probit_local_df$pch[trades_counter - 3]
+    probit_local_df$y3[trades_counter] <<- ifelse(is.na(probit_local_df$y3[trades_counter]),
+                                                  0,
+                                                  probit_local_df$y3[trades_counter])
     
     probit_local_df$v3[trades_counter] <<- probit_local_df$v1[trades_counter - 2]
     probit_local_df$v2[trades_counter] <<- probit_local_df$v1[trades_counter - 1]
     probit_local_df$v1[trades_counter] <<- trade_size
     
     probit_local_df$barrier_price_diff[trades_counter] <<- barrier - probit_local_df$last_es_price[trades_counter] - tick
-  
+    
+    decomp_local_df$aim1[trades_counter] <<- ifelse(probit_local_df$pch[trades_counter] == 0, 0, 1)
+    decomp_local_df$dim1[trades_counter] <<- sign(probit_local_df$pch[trades_counter])
+    decomp_local_df$sim1[trades_counter] <<- abs(probit_local_df$pch[trades_counter])
+    decomp_local_df$k[trades_counter] <<- (barrier - trades_df$trade_price[trades_counter]) / tick
+    decomp_local_df$cross_prob[trades_counter] <<- 1 - (pch_decomposition_cdf(decomp_local_df$k[trades_counter],
+                                                                              decomp_local_df$aim1[trades_counter], 
+                                                                              decomp_local_df$dim1[trades_counter], 
+                                                                              decomp_local_df$sim1[trades_counter], 
+                                                                              decomp_params))
+    
   }
   
   if (symbol == 'VX' && trades_counter >  3){
@@ -93,39 +121,45 @@ markettrade_handler <- function(symbol, trade_price, trade_size, trade_side) {
   
   probit_predictions <<- as.data.frame(predict(m1, probit_local_df, type = "p")) %>%
     rename_all(function(x) paste0(x, "_pred")) %>%
-    mutate_all(function(x) ifelse(is.na(x), 0, x)) %>%
-    mutate(time = now)
+    mutate_all(function(x) ifelse(is.na(x), 0, x))
+  
+  
   
   # now calculate the signal
   # default signal = 0 means nothing to do
   
   
-  #best training score: 100 / 100
-  #PnL: -150 on 5 trades (2 forced on sell limits)
-  #parameters: .75 barrier_prob & barrier_diff_threshold > 25 and < -25
+  #best test score: 100 / 100
+  #PnL: -575 on 20 trades (5 forced)
+  #barrier threshold at .3
   
-  barrier_diff_threshold <- 25
-  barrier_prob <- .75
+  barrier_threshold <- .3
   
   signal <- 0
   
     if (trades_counter >  3 && position < 1){
-      if (barrier - probit_local_df$last_es_price[trades_counter] - tick  < barrier_diff_threshold){
-        if(probit_predictions$`0_pred`[trades_counter] + 
-          probit_predictions$`1_pred`[trades_counter] > barrier_prob){
+      if (probit_local_df$last_es_price[trades_counter]  >= barrier){
+        if(sum(probit_predictions$`0_pred`[trades_counter] + 
+               probit_predictions$`-1_pred`[trades_counter] +
+               decomp_local_df$cross_prob[trades_counter], na.rm = T) / 2 > barrier_threshold){
           signal <- +1
           }
         }
       }
   
-  if (trades_counter >  3 && position >= 1){
-    if (barrier - probit_local_df$last_es_price[trades_counter] - tick  > -barrier_diff_threshold){
-      if(probit_predictions$`-1_pred`[trades_counter] + 
-         probit_predictions$`0_pred`[trades_counter] > barrier_prob){
+  if (trades_counter >  3 && position >= 1 && trades_df$symbol[trades_counter] == "ES"){
+    if (probit_local_df$last_es_price[trades_counter] < barrier){
+      if(sum(probit_predictions$`0_pred`[trades_counter] + 
+             probit_predictions$`-1_pred`[trades_counter] +
+             decomp_local_df$cross_prob[trades_counter], na.rm = T) / 2 < barrier_threshold){
         signal <- -1
       }
-    }
-  }
+      
+      if (probit_local_df$last_es_price[trades_counter] - barrier < -15000){
+      signal <- 0
+        }
+      }
+  } 
   
   if (signal != 0)
     message(now, " : ","Sending signal: ", signal)

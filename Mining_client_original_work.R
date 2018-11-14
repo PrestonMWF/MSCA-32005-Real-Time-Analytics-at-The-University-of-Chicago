@@ -13,6 +13,9 @@ signal_track <- data.frame(current_time = as.numeric(rep(NA, BUF_SIZE)),
                            intensity = as.numeric(rep(NA, BUF_SIZE)),
                            time_to_shock = as.numeric(rep(NA, BUF_SIZE)))
 
+collapse_predictions <- data.frame(preds = as.numeric(rep(0, BUF_SIZE)),
+                                   pred_rle = as.numeric(rep(NA, BUF_SIZE)))
+
 eventMoments <- rep(NA, BUF_SIZE)         # time spans from i-th signal and the first signal in minutes, eventMoments[1] = 0 
 initial_timestamp <- Sys.time()     # start-of-program timestamp
 plot_timestamp <- initial_timestamp # we use plot_timestamp to draw the plot once in a second
@@ -54,11 +57,11 @@ new_event_handler <- function() {
   
   earliest_fit <- 12
   
-  tc_collect <- function(record){
+  tc_collect <- function(event){
     
-    current_time <- signal_track$current_time[record]
+    current_time <- signal_track$current_time[event]
     
-    t_grid <- seq(current_time - t0 + dt, current_time, by = dt) # grid at t0
+    t_grid <- seq(current_time - t0 + dt, current_time, by = dt)
     
     events_grid <- findInterval(t_grid, na.omit(signal_track$current_time))
     
@@ -73,13 +76,13 @@ new_event_handler <- function() {
     # Use pmax(x, 0.1) to avoid log(0)
     log_intensity <- log(pmax(intensity, 0.1))
     
-    res <- nloptr(x0= current_time+1, 
-                  eval_f=regression, 
-                  lb=current_time+0.1, 
-                  ub=current_time+10, 
-                  opts=list("algorithm"="NLOPT_LN_COBYLA", "xtol_rel" = 1e-04),
-                  logRate=log_intensity,
-                  regressionTimes=time_grid, returnError=TRUE)
+    res <- nloptr(x0 = current_time + 1, 
+                  eval_f = regression, 
+                  lb = current_time + 0.1, 
+                  ub = current_time + 10, 
+                  opts = list("algorithm"="NLOPT_LN_COBYLA", "xtol_rel" = 1e-04),
+                  logRate = log_intensity,
+                  regressionTimes = time_grid, returnError=TRUE)
     
     tc <- res$solution
     
@@ -98,22 +101,28 @@ new_event_handler <- function() {
   
   if (incoming_signals_counter > earliest_fit){
   
-    tc <- tc_collect(record = incoming_signals_counter)  
+    tc <- tc_collect(event = incoming_signals_counter)  
     
     signal_track[incoming_signals_counter, 2:4] <<- tc
     
-    collapse_predictions[incoming_signals_counter,]  <<- predict(
+    collapse_pred  <<- predict(
       object = collapse_forest, 
-      newdata = signal_track[incoming_signals_counter, ], 
+      newdata = signal_track, 
       type = "response"
-        )%>% 
-      as.data.frame() %>%
-      rename(preds = ".") %>%
-      mutate(preds = as.numeric(preds) - 1)
-    
-    collapse_predictions$collapse_rle[incoming_signals_counter] <<- rle(
-      x = collapse_predictions$preds[incoming_signals_counter]
         )
+    
+    collapse_predictions$preds[incoming_signals_counter] <<- collapse_pred[incoming_signals_counter]
+    
+    collapse_predictions$preds <<- as.numeric(collapse_predictions$preds)
+    
+    collapse_predictions$pred_rle[incoming_signals_counter] <<- sequence(rle(collapse_predictions$preds)$lengths)[incoming_signals_counter]
+    
+    if (collapse_predictions$pred_rle[incoming_signals_counter] == 10 &&
+        collapse_predictions$preds[incoming_signals_counter] == 2){
+      
+      send_signal <- TRUE
+
+    }
     
   }
     

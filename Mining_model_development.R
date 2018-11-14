@@ -124,10 +124,10 @@ results_table <- map_df(25:nrow(mining), function(x) tc_collect(record = x)) %>%
 
 results_table <- results_table %>%
   mutate(alert_time = c(map(103:1, function(x) max(results_table$current_time) - 
-                            results_table$current_time[nrow(results_table) - x]) %>% 
-           as.numeric(), 0),
+                              results_table$current_time[nrow(results_table) - x]) %>% 
+                          as.numeric(), 0),
          collapse = ifelse(alert_time < 2, 1, 0)) %>%
-  select(current_time, p, intensity, time_to_shock, collapse)
+  select(p, intensity, time_to_shock, collapse)
 
 collapse_glm <- glm(collapse ~., data = results_table)
 
@@ -150,3 +150,8 @@ mining %>%
   ggplot(aes(time, n_events, colour = forest_pred)) +
   geom_point() +
   ggtitle("Send message after 3-5 positive signals in a row to avoid false alarm")
+
+
+#saving objects for stream
+save(collapse_forest, file = "collapse_random_forest.rda")
+save(regression, file = "optimized_regression.rda")

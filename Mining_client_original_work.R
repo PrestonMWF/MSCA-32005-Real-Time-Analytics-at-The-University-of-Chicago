@@ -1,5 +1,9 @@
 source("Mining_connection.R")
 
+load("collapse_random_forest.rda")
+load("optimized_regression.rda")
+load("tc_stream_collector.rda")
+
 # global vars
 incoming_signals_counter <- 0                                   # incoming signals event counter
 outgoing_signals_counter <- 0                                   # outgoing signals event counter
@@ -47,23 +51,26 @@ new_event_handler <- function() {
   
   signal_track$current_time[incoming_signals_counter] <<- t
   
+  #paramaters for tc collection
   dt <- 0.05
   
-  w <- 10 # experiment with window width to estimate intensity
+  w <- 10
   
-  n <- 50 # experiment with number of observations of intensity in the model
+  n <- 50 
   
-  t0 <- ((n + w) * dt) # earliest time when regression can be fitted
+  t0 <- ((n + w) * dt) 
   
   earliest_fit <- 12
   
+  send_signal <- FALSE
+  
+  #function for stream- run before test so object is in global environment 
   tc_collect <- function(event){
-    
     current_time <- signal_track$current_time[event]
     
-    t_grid <- seq(current_time - t0 + dt, current_time, by = dt)
+    t_grid <- seq(current_time - t0 + dt, current_time, by = dt) # grid at t0
     
-    events_grid <- findInterval(t_grid, na.omit(signal_track$current_time))
+    events_grid <- findInterval(t_grid, signal_track$current_time)
     
     N <- length(t_grid)
     
@@ -76,13 +83,13 @@ new_event_handler <- function() {
     # Use pmax(x, 0.1) to avoid log(0)
     log_intensity <- log(pmax(intensity, 0.1))
     
-    res <- nloptr(x0 = current_time + 1, 
-                  eval_f = regression, 
-                  lb = current_time + 0.1, 
-                  ub = current_time + 10, 
-                  opts = list("algorithm"="NLOPT_LN_COBYLA", "xtol_rel" = 1e-04),
-                  logRate = log_intensity,
-                  regressionTimes = time_grid, returnError=TRUE)
+    res <- nloptr(x0= current_time+1, 
+                  eval_f=regression, 
+                  lb=current_time+0.1, 
+                  ub=current_time+10, 
+                  opts=list("algorithm"="NLOPT_LN_COBYLA", "xtol_rel" = 1e-04),
+                  logRate=log_intensity,
+                  regressionTimes=time_grid, returnError=TRUE)
     
     tc <- res$solution
     
@@ -96,8 +103,6 @@ new_event_handler <- function() {
     
     return(params)
   }
-  
-  send_signal <- FALSE
   
   if (incoming_signals_counter > earliest_fit){
   
@@ -176,6 +181,9 @@ inc_signals <- inc_signals[!is.na(inc_signals$time),]
 out_signals <- out_signals[!is.na(out_signals$time),]
 
 signal_track <- signal_track[!is.na(signal_track$current_time),] %>%
+  as.data.frame()
+
+collapse_predictions <- collapse_predictions[!is.na(collapse_predictions$pred_rle),] %>%
   as.data.frame()
 
 eventMoments <- eventMoments[1:incoming_signals_counter]

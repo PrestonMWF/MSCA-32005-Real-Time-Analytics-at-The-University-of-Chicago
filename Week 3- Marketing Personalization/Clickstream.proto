@@ -1,0 +1,24 @@
+syntax = "proto2";
+
+package Clickstream;
+option optimize_for = SPEED;
+
+
+// Server -> Client.
+message Event {
+    optional int64 server_timestamp_usec = 1;
+    optional int32 visitor_id            = 2;
+    repeated int32 features              = 3; // 93 numbers
+    optional string error                = 4;					
+    optional bool  stream_end            = 5;
+    optional double penalty              = 6;
+    repeated int32 missed_id             = 7;
+    optional int64 score                 = 8;
+}
+
+
+// Client -> Server.
+message Signal {
+    optional int32 visitor_id            = 1;
+    repeated double probabilities        = 2; // vector of 5 with values in [0,1] and sum = 1
+}

@@ -1,0 +1,20 @@
+syntax = "proto2";
+
+package Yield;
+option optimize_for = SPEED;
+
+// Server -> Client
+message Event {
+    optional int64 server_timestamp_usec = 1;
+    optional string error                = 2;
+    optional bool   stream_end           = 3;
+    optional double price                = 4;
+    optional bool   sold                 = 5;
+    optional double pnl                  = 6;
+    optional int64 score                 = 7;
+}
+
+// Client -> Server
+message Signal {
+    required double price = 1;
+}
